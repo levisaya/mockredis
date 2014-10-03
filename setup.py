@@ -21,7 +21,8 @@ setup(name='mockredispy',
           'lua': ['lunatic-python-bugfix==1.1.1'],
       },
       tests_require=[
-          'redis>=2.9.0'
+          'redis>=2.9.0',
+          'six>=1.8.0'
       ],
       test_suite='mockredis.tests',
       entry_points={

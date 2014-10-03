@@ -51,7 +51,7 @@ class WithRedis(Plugin):
         if options.use_redis:
             from redis import Redis, RedisError, ResponseError, StrictRedis, WatchError
 
-            WithRedis.Redis = partial(Redis, db=options.redis_database)
+            WithRedis.Redis = partial(Redis, db=options.redis_database, decode_responses=True)
             WithRedis.StrictRedis = partial(StrictRedis, db=options.redis_database)
             WithRedis.ResponseError = ResponseError
             WithRedis.RedisError = RedisError

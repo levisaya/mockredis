@@ -15,6 +15,7 @@ from mockredis.exceptions import RedisError, ResponseError
 from mockredis.pipeline import MockRedisPipeline
 from mockredis.script import Script
 from mockredis.sortedset import SortedSet
+from mockredis.pubsub import PubSubTransport, MockPubSub
 
 if sys.version_info >= (3, 0):
     long = int
@@ -52,8 +53,6 @@ class MockRedis(object):
         # The 'Redis' store
         self.redis = defaultdict(dict)
         self.timeouts = defaultdict(dict)
-        # The 'PubSub' store
-        self.pubsub = defaultdict(list)
         # Dictionary from script to sha ''Script''
         self.shas = dict()
 
@@ -227,7 +226,7 @@ class MockRedis(object):
 
     def flushdb(self):
         self.redis.clear()
-        self.pubsub.clear()
+        PubSubTransport().clear()
         self.timeouts.clear()
 
     def rename(self, old_key, new_key):
@@ -1266,9 +1265,11 @@ class MockRedis(object):
         return response
 
     #### PubSub commands ####
-
     def publish(self, channel, message):
-        self.pubsub[channel].append(message)
+        PubSubTransport().publish(channel, message)
+
+    def pubsub(self, **kwargs):
+        return MockPubSub(**kwargs)
 
     #### Internal ####
 
