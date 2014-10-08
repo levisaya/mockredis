@@ -8,6 +8,7 @@ else:
     from Queue import Queue, Empty
 
 from six import with_metaclass
+import re
 
 
 class Singleton(type):
@@ -30,7 +31,8 @@ class PubSubTransport(with_metaclass(Singleton, object)):
 
     def __init__(self):
         # Container mapping channel names to the subscribers.
-        self.callbacks = defaultdict(list)
+        self._subscribe_callbacks = defaultdict(list)
+        self._pattern_callbacks = defaultdict(list)
 
     def clear(self):
         """
@@ -43,18 +45,65 @@ class PubSubTransport(with_metaclass(Singleton, object)):
         Subscribe to the named channels.
         """
         for channel in args:
-            self.callbacks[channel].append(pubsub)
+            self._subscribe_callbacks[channel].append(pubsub)
 
             # Push the subscribe message back down to the pubsub instance.
             pubsub.handle_message(channel,
                                   self.num_subscriptions(pubsub),
                                   'subscribe')
 
+    def _pattern_to_regex(self, pattern):
+        regex = pattern
+
+        # Replace ? with single character wildcard
+        regex = regex.replace('?', '.')
+
+        # Replace * with 1 or more character wildcard
+        regex = regex.replace('*', '.+')
+
+        return regex
+
+    def psubscribe(self, pubsub, *args):
+        for pattern in args:
+            self._pattern_callbacks[pattern].append(pubsub)
+
+            # Push the subscribe message back down to the pubsub instance.
+            pubsub.handle_message(pattern,
+                                  self.num_subscriptions(pubsub),
+                                  'psubscribe')
+
+    def punsubscribe(self, pubsub, *args):
+        if len(args) == 0:
+            # Unsubscribe from all patterns.
+            for pattern, subscribers in self._pattern_callbacks.items():
+                try:
+                    subscribers.remove(pubsub)
+                except ValueError:
+                    pass
+                else:
+                    # Push the unsubscribe message back down to the pubsub instance.
+                    pubsub.handle_message(pattern,
+                                          self.num_subscriptions(pubsub),
+                                          'punsubscribe')
+        else:
+            # Unsubscribe from specified channels.
+            for pattern in args:
+                try:
+                    self._pattern_callbacks[pattern].remove(pubsub)
+                except ValueError:
+                    pass
+                else:
+                    # Push the unsubscribe message back down to the pubsub instance.
+                    pubsub.handle_message(pattern,
+                                          self.num_subscriptions(pubsub),
+                                          'punsubscribe')
+
     def num_subscriptions(self, pubsub):
         """
         Get the number of channels the given pubsub instance is subscribed to.
         """
-        return len([x for x in self.callbacks.values() if pubsub in x])
+        return len([x for x in self._subscribe_callbacks.values() if pubsub in x]) +\
+               len([x for x in self._pattern_callbacks.values() if pubsub in x])
 
     def unsubscribe(self, pubsub, *args):
         """
@@ -62,7 +111,7 @@ class PubSubTransport(with_metaclass(Singleton, object)):
         """
         if len(args) == 0:
             # Unsubscribe from all channels.
-            for channel, channel_list in self.callbacks.items():
+            for channel, channel_list in self._subscribe_callbacks.items():
                 try:
                     channel_list.remove(pubsub)
                 except ValueError:
@@ -76,21 +125,26 @@ class PubSubTransport(with_metaclass(Singleton, object)):
             # Unsubscribe from specified channels.
             for channel in args:
                 try:
-                    self.callbacks[channel].remove(pubsub)
+                    self._subscribe_callbacks[channel].remove(pubsub)
                 except ValueError:
                     pass
-
-        # Push the unsubscribe message back down to the pubsub instance.
-        pubsub.handle_message(channel,
-                              self.num_subscriptions(pubsub),
-                              'unsubscribe')
+                else:
+                    # Push the unsubscribe message back down to the pubsub instance.
+                    pubsub.handle_message(channel,
+                                          self.num_subscriptions(pubsub),
+                                          'unsubscribe')
 
     def publish(self, channel, data):
         """
         Push the message out to each subscribed pubsub instance.
         """
-        for pubsub in self.callbacks[channel]:
+        for pubsub in self._subscribe_callbacks[channel]:
             pubsub.handle_message(channel, data, 'message')
+
+        for pattern, subscribers in self._pattern_callbacks.items():
+            if re.match(self._pattern_to_regex(pattern), channel) is not None:
+                for pubsub in subscribers:
+                    pubsub.handle_message(channel, data, 'pmessage', pattern=pattern)
 
 
 class MockPubSub(object):
@@ -101,10 +155,9 @@ class MockPubSub(object):
         self.reset()
 
     def reset(self):
-        self.channels = {}
-        self.patterns = {}
-        self.message_queue = Queue()
         self.transport = PubSubTransport()
+        self.transport.unsubscribe(self)
+        self.message_queue = Queue()
 
     def close(self):
         """
@@ -133,13 +186,13 @@ class MockPubSub(object):
         """
         TODO
         """
-        pass
+        self.transport.psubscribe(self, *args)
 
     def punsubscribe(self, *args):
         """
         TODO
         """
-        pass
+        self.transport.punsubscribe(self, *args)
 
     def subscribe(self, *args, **kwargs):
         """
